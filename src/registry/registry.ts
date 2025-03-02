@@ -17,26 +17,24 @@ export type GetNodeRegistryBody = {
 
 export async function launchRegistry() {
   const _registry = express();
-  // Define array to store registered nodes
-  let registeredNodes: GetNodeRegistryBody = { nodes: [] };
-
+  let registeredNodes: GetNodeRegistryBody = { nodes: [] }; // to store registered nodes
   _registry.use(express.json());
   _registry.use(bodyParser.json());
-
-
+  
+  // status route
   _registry.get("/status", (req, res) => {
     res.send("live");
   });
 
+  //register route
   _registry.post("/registerNode", (req, res) => {
     const { nodeId, pubKey }: RegisterNodeBody = req.body;
-     // Generate private key
       const newNode: Node = { nodeId, pubKey };
-      registeredNodes.nodes.push(newNode);
+      registeredNodes.nodes.push(newNode); // the generated key is added
       res.status(201).json({ message: "Node registered successfully" });
   });
 
-  // Get node registry route
+  // node registery route
   _registry.get("/getNodeRegistry", (req, res) => {
     res.json(registeredNodes);
   });

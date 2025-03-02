@@ -1,72 +1,74 @@
-import crypto from "crypto"; 
-import bodyParser from "body-parser"; 
-import express, { Request, Response } from "express"; // for handling HTTP requests
-import { BASE_ONION_ROUTER_PORT, REGISTRY_PORT } from "../config"; // import configuration constants
-import { exportPrvKey, exportPubKey, generateRsaKeyPair, rsaDecrypt, symDecrypt } from "../crypto"; // import implemented cryptographic functions
-import { Node } from "../registry/registry"; // import Node type from registry module
-import * as console from "console"; // explicitly import console module
+import crypto from "crypto";
+import bodyParser from "body-parser";
+import express, { Request, Response } from "express";
+import { BASE_ONION_ROUTER_PORT, REGISTRY_PORT } from "../config"; // Import port configurations
+import { exportPrvKey, exportPubKey, generateRsaKeyPair, rsaDecrypt, symDecrypt } from "../crypto"; // Import cryptographic functions
+import { Node } from "../registry/registry"; // Import Node type definition
+import * as console from "console";
 
-// function to create a simple onion router
 export async function simpleOnionRouter(nodeId: number) {
-  const onionRouter = express(); 
-  onionRouter.use(express.json()); 
-  onionRouter.use(bodyParser.json()); 
+  const onionRouter = express();
+  onionRouter.use(express.json());
+  onionRouter.use(bodyParser.json());
 
-  // variables so that we store the last received decrypted/encrypted messages and destination
+  // we store the last received messages and data linked to them
   let lastReceivedEncryptedMessage: string | null = null;
   let lastReceivedDecryptedMessage: string | null = null;
   let lastMessageDestination: number | null = null;
 
-  // generate RSA key pair for encryption/decryption
+  // gennerate the key pair for encryption/decryption
   let rsaKeyPair = await generateRsaKeyPair();
-  let pubKey = await exportPubKey(rsaKeyPair.publicKey); // Export public key
-  let privateKey = rsaKeyPair.privateKey; // Store private key
+  let pubKey = await exportPubKey(rsaKeyPair.publicKey); // Export public key for sharing
+  let privateKey = rsaKeyPair.privateKey; // Store private key for decryption
 
-  // server status endpoint
+  // status route
   onionRouter.get("/status", (req, res) => {
-    res.send("live"); // Respond with "live" status
+    res.send("live");
   });
 
-  // endpoint to get  last received encrypted message
+  // last received encrypted message
   onionRouter.get("/getLastReceivedEncryptedMessage", (req: Request, res: Response) => {
     res.status(200).json({ result: lastReceivedEncryptedMessage });
   });
 
-  // endpoint to get last received decrypted message
+  // last decrypted message
   onionRouter.get("/getLastReceivedDecryptedMessage", (req: Request, res: Response) => {
     res.status(200).json({ result: lastReceivedDecryptedMessage });
   });
 
-  // endpoint to get  last message destination
+  // last known destination of a message
   onionRouter.get("/getLastMessageDestination", (req: Request, res: Response) => {
     res.status(200).json({ result: lastMessageDestination });
   });
 
-  // endpoint to get private key 
+  // retrive private key
   onionRouter.get("/getPrivateKey", async (req, res) => {
-    res.status(200).json({ result: await exportPrvKey(privateKey) }); // Export private key
+    res.status(200).json({ result: await exportPrvKey(privateKey) });
   });
 
-  // endpoint to receive and process an onion-routed message
+  // get message
   onionRouter.post("/message", async (req, res) => {
-    const { mess } = req.body; // extract encrypted message from request body
+    const { message } = req.body; // extract message
 
-    const decryptedKey = await rsaDecrypt(mess.slice(0, 344), privateKey); // decrypt the symmetric key using RSA private key
-    
-    // decrypt the actual message using the decrypted symmetric key
-    const decryptedMessage = await symDecrypt(decryptedKey, mess.slice(344));
+    // decrypt symmetric key using crypto function
+    const decryptedKey = await rsaDecrypt(message.slice(0, 344), privateKey);
 
-    // extract the next destination node from the decrypted message
+    // decrypt the  message using the decrypted key
+    const decryptedMessage = await symDecrypt(decryptedKey, message.slice(344));
+
+    // Extract the next destination from the message which has been decrypted
     const nextDestination = parseInt(decryptedMessage.slice(0, 10), 10);
-    const remainingMessage = decryptedMessage.slice(10); // extract the remaining message
 
-    // update stored values for tracking and adressing potential issues
-    lastReceivedEncryptedMessage = mess;
+    // exctract the remaining of the message
+    const remainingMessage = decryptedMessage.slice(10);
+
+    // store the received message 
+    lastReceivedEncryptedMessage = message;
     lastReceivedDecryptedMessage = remainingMessage;
     lastMessageDestination = nextDestination;
 
     try {
-      // forward the remaining message to the next onion router node
+      // forward the decrypted message 
       await fetch(`http://localhost:${nextDestination}/message`, {
         method: "POST",
         headers: {
@@ -74,15 +76,16 @@ export async function simpleOnionRouter(nodeId: number) {
         },
         body: JSON.stringify({ message: remainingMessage }),
       });
-      res.status(200).send("success"); // responding with success
+
+      res.status(200).send("success");
     } catch (error) {
       // @ts-ignore
       console.error("Error sending message:", error.message);
-      res.status(500).json({ error: "Internal server error" }); 
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
-  // register the node with the registry
+  // reegistering of the the onion router
   try {
     await fetch(`http://localhost:${REGISTRY_PORT}/registerNode`, {
       method: "POST",
@@ -90,22 +93,20 @@ export async function simpleOnionRouter(nodeId: number) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        nodeId: nodeId, // node Id
-        pubKey: pubKey, // public key
+        nodeId: nodeId, // ID of node 
+        pubKey: pubKey, // public key 
       }),
     });
-    console.log(`Node ${nodeId} registered successfully.`); // successful registration
+    console.log(`Node ${nodeId} registered successfully.`);
   } catch (error) {
     // @ts-ignore
-    console.error(`Error registering node ${nodeId}:`, error.message); 
+    console.error(`Error registering node ${nodeId}:`, error.message);
   }
 
-  // start the onion router server on the correct port
+  // start router
   const server = onionRouter.listen(BASE_ONION_ROUTER_PORT + nodeId, () => {
     console.log(
-        `Onion router ${nodeId} is listening on port ${
-            BASE_ONION_ROUTER_PORT + nodeId
-        }`
+      `Onion router ${nodeId} is listening on port ${BASE_ONION_ROUTER_PORT + nodeId}`
     );
   });
 
